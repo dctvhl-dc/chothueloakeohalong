@@ -43,7 +43,7 @@ Mật khẩu mới được lưu SHA-256, không gửi mật khẩu/hash xuống
 
 ## 3. Đưa website lên GitHub Pages
 
-1. Tạo repository mới trên GitHub, ví dụ `web-cho-thue-loa`. Nếu dùng GitHub Free, chọn **Public** để dùng Pages miễn phí. Không chọn tạo sẵn README, `.gitignore` hoặc license vì thư mục website đã có file README.
+1. Tạo repository mới trên GitHub, ví dụ `web-cho-thue-loa`. Nếu dùng GitHub Free, chọn **Public** để dùng Pages miễn phí. Lý tưởng nhất là không chọn tạo README, `.gitignore` hoặc license vì thư mục website đã có sẵn các file đó. Nếu bạn đã tạo README trên GitHub thì vẫn dùng được — làm theo mục “Đã tạo repository/README trước” bên dưới.
 2. Nếu đã triển khai Apps Script, điền URL `/exec` vào `apiUrl` trong `config.js` trước khi đưa mã lên GitHub. Nếu chưa điền, trang mẫu vẫn mở nhưng khách chưa thể tải dịch vụ hoặc gửi đơn.
 3. Mở PowerShell và chạy các lệnh sau. Thay `<USERNAME>` và `<REPO>` bằng tên tài khoản và repository bạn vừa tạo:
 
@@ -61,6 +61,30 @@ Mật khẩu mới được lưu SHA-256, không gửi mật khẩu/hash xuống
 5. Mở tab **Actions**, chờ workflow `Deploy static website to GitHub Pages` chạy xong với trạng thái thành công. Trong **Settings → Pages**, GitHub sẽ hiển thị địa chỉ mặc định dạng `https://<USERNAME>.github.io/<REPO>/`.
 
 GitHub Pages công khai website cho mọi người, kể cả trong trường hợp repository riêng tư thuộc gói hỗ trợ Pages riêng tư. Không đưa mật khẩu, Service Account JSON, private key hoặc dữ liệu riêng tư vào repository hay website.
+
+### Đã tạo repository hoặc README trên GitHub trước
+
+Không xóa repository và không cần tạo lại. Để tránh lỗi do lịch sử GitHub đã có một commit README khác với thư mục website trên máy:
+
+1. Clone repository GitHub vào **một thư mục mới, đang trống**. Ví dụ dùng GitHub Desktop: **File → Clone repository…**, chọn repository vừa tạo và đặt Local path là `D:\Setup\Code\Web Loa keo-github` (không clone đè lên thư mục website hiện tại).
+2. Sao chép toàn bộ nội dung trong `D:\Setup\Code\Web Loa keo` sang `D:\Setup\Code\Web Loa keo-github`, cho phép ghi đè README mẫu của GitHub bằng README đầy đủ của website. Đảm bảo sao chép cả `.github` và `.nojekyll`.
+3. Mở repository đã clone trong GitHub Desktop. Kiểm tra danh sách Changes có các file website, trong đó README là file đã sửa. Nhập Summary như `Add website files`, bấm **Commit to main**, rồi **Push origin**.
+4. Tiếp tục với bước chọn GitHub Actions ở trên.
+
+Có thể thay thao tác sao chép bằng PowerShell sau khi clone xong; lệnh này giữ thư mục `.git` của bản clone để kết nối đúng lịch sử repository:
+
+```powershell
+$source = "D:\Setup\Code\Web Loa keo"
+$destination = "D:\Setup\Code\Web Loa keo-github"
+Get-ChildItem -LiteralPath $source -Force |
+  Where-Object { $_.Name -ne ".git" } |
+  Copy-Item -Destination $destination -Recurse -Force
+git -C $destination add .
+git -C $destination commit -m "Add website files"
+git -C $destination push
+```
+
+Sau khi push, tiếp tục làm việc trong thư mục clone `Web Loa keo-github` (hoặc dùng GitHub Desktop mở thư mục này), để các lần commit/push sau đi đúng repository.
 
 ## 4. Gán tên miền đang có vào GitHub Pages
 
