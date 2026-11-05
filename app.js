@@ -41,7 +41,9 @@
   responseFrame.hidden = true;
   document.body.append(responseFrame);
   window.addEventListener("message", (event) => {
-    if (event.source !== responseFrame.contentWindow || !event.data || typeof event.data.id !== "string") return;
+    const trustedOrigin = event.origin === "https://script.google.com"
+      || /^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/.test(event.origin);
+    if (!trustedOrigin || !event.data || typeof event.data.id !== "string" || typeof event.data.ok !== "boolean") return;
     const resolve = pendingRequests.get(event.data.id);
     if (!resolve) return;
     pendingRequests.delete(event.data.id);

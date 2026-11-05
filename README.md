@@ -126,3 +126,14 @@ GitHub Pages chỉ host frontend tĩnh. Không thêm service-account JSON, priva
 ## Chạy và kiểm tra cục bộ
 
 Có thể mở `index.html` để xem giao diện tĩnh. Để kiểm tra kết nối Apps Script, phục vụ thư mục qua local HTTP server (không dùng `file://`) và điền URL `/exec` vào `config.js`. Nếu chưa kết nối API, trang vẫn hiển thị thông tin giới thiệu/dịch vụ mẫu và hotline; form sẽ báo rõ nếu chưa có endpoint hợp lệ.
+
+### Cập nhật mã Apps Script sau khi sửa
+
+Thay đổi trong `apps-script/Code.gs` **không tự cập nhật** project Google Apps Script đã triển khai:
+
+1. Mở project Apps Script mà URL `/exec` đang trỏ tới, mở `Code.gs` và thay nội dung bằng phiên bản mới trong repository.
+2. Trong **Project Settings → Script properties**, bảo đảm `SHEET_ID` đã được cấu hình; không chép ID spreadsheet vào mã nguồn công khai.
+3. Chọn **Deploy → Manage deployments**, bấm biểu tượng bút chì ở deployment loại Web app, chọn **New version** rồi bấm **Deploy**. Dùng lại URL `/exec` hiện tại.
+4. Nếu thay cả frontend, commit và push các file website lên nhánh `main`; GitHub Actions sẽ triển khai frontend mới.
+
+Đăng nhập quản trị gửi form POST tới Apps Script trong iframe. Ứng dụng nhận thông điệp phản hồi từ frame sandbox của Google, vì vậy khi cập nhật phải đồng bộ cả `app.js` (kiểm tra origin phản hồi) và `apps-script/Code.gs` (chuyển tiếp postMessage về trang website).
