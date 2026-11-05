@@ -5,31 +5,46 @@ Website tĩnh tiếng Việt, responsive trên điện thoại và máy tính, �
 ## Thành phần
 
 - `index.html`, `styles.css`, `app.js`: trang giới thiệu, dịch vụ, form đặt thuê, tin tức, đánh giá, bộ sưu tập, liên hệ và khu vực quản trị.
-- `apps-script/Code.gs`: API trung gian đọc/ghi Google Sheets, tiếp nhận đơn theo schema ứng dụng `dc_tech_rental`, xác thực quản trị và lưu nội dung website.
+- `apps-script/Code.gs`: API trung gian đọc dịch vụ, ghi đơn và xác thực quản trị bằng Google Sheets; chuyển nội dung website và ảnh sang Supabase.
+- `apps-script/appsscript.json`: các quyền OAuth cần cho Google Sheets, Google Drive và kết nối Supabase.
+- `supabase/schema.sql`: bảng nội dung/trang, chính sách đọc công khai và bucket lưu ảnh.
 - `.github/workflows/pages.yml`: tự động xuất bản các tệp tĩnh khi push lên nhánh `main`.
 
-Trang dùng hình minh họa dạng CSS vì chưa thể nhập/xác minh ảnh gốc từ Google Sites trong workspace này. Ảnh bộ sưu tập thực tế có thể đặt trên một địa chỉ HTTPS công khai và nhập qua chức năng quản trị.
+Các tệp giao diện được phục vụ tĩnh từ GitHub Pages. GitHub Pages không cung cấp database hoặc nơi tải ảnh lên; dữ liệu CMS và ảnh được lưu ở Supabase Free. Không đưa khóa Supabase bí mật vào GitHub hoặc trình duyệt.
 
-## 1. Kết nối Google Sheets
+## 1. Tạo database và kho ảnh Supabase miễn phí
+
+1. Tạo organization và project Supabase theo gói **Free**. Với website ở Việt Nam, chọn khu vực gần nhất có sẵn (thường là Singapore).
+2. Trong project, mở **SQL Editor → New query**, dán và chạy toàn bộ nội dung `supabase/schema.sql`. Việc này tạo bảng bài viết/đánh giá/thư viện, cài quyền đọc công khai có RLS, và tạo bucket ảnh công khai `website-images`. Chỉ URL ảnh được công khai; thao tác tải lên vẫn được khóa bằng phiên quản trị.
+3. Mở **Project Settings → API Keys** và lấy Project URL cùng **Secret API key** (`sb_secret_...`). Secret key có toàn quyền trên database/bucket: chỉ lưu trong Apps Script Script Properties, tuyệt đối không đặt vào `config.js`, `app.js`, HTML, GitHub Actions hoặc gửi cho người khác. Không dùng khóa cũ `service_role` (Supabase đang ngừng hỗ trợ nhóm khóa cũ).
+4. Trong Apps Script project, vào **Project Settings → Script properties**, thêm:
+   - `SUPABASE_URL`: Project URL dạng `https://<project-ref>.supabase.co`
+   - `SUPABASE_SECRET_KEY`: Secret API key (`sb_secret_...`)
+5. Nếu khóa bị lộ, lập tức xoay (rotate) khóa trong Supabase và cập nhật Script Property.
+
+Ảnh tải từ CMS được lưu vào Supabase Storage, bucket `website-images`; hệ thống tự tạo URL HTTPS công khai và ghi URL đó vào nội dung trong PostgreSQL. Giới hạn mỗi ảnh 4 MB, định dạng JPEG, PNG, WebP hoặc GIF.
+
+## 2. Kết nối Google Sheets
 
 1. Mở [Google Apps Script](https://script.google.com/), tạo một project do tài khoản có quyền truy cập vào spreadsheet sở hữu.
-2. Dán nội dung `apps-script/Code.gs` vào `Code.gs`.
-3. Mở **Project Settings → Script properties**, thêm:
+2. Dán nội dung `apps-script/Code.gs` vào `Code.gs`. Trong **Project Settings**, bật hiển thị tệp kê khai `appsscript.json` và thay nội dung bằng `apps-script/appsscript.json`.
+3. Mở **Project Settings → Script properties**, thêm (giữ cả các thuộc tính Supabase ở trên):
    - Property: `SHEET_ID`
    - Value: ID của spreadsheet mà ứng dụng `dc_tech_rental` đang sử dụng.
-4. Chạy hàm `doGet` không trực tiếp trong editor sẽ không kiểm tra được callback. Hãy lưu project, chọn **Deploy → New deployment → Web app**, đặt **Execute as: Me** và cấp quyền truy cập công khai (**Anyone**) để khách có thể gửi yêu cầu thuê. Chấp thuận quyền Google Sheets/URL Fetch khi Google hỏi.
-5. Sao chép URL triển khai có đuôi `/exec`. Không công khai Apps Script editor cho khách.
-6. Điền URL triển khai vào `apiUrl` trong `config.js`, rồi push lại để publish. Đây là URL public của API, không phải credential. Cấu hình này là bắt buộc để mọi khách truy cập trên thiết bị khác nhau đều tải được dịch vụ và gửi đơn.
+4. Lưu project, chọn hàm `authorizeSupabase` trong editor rồi bấm **Run**. Tài khoản sở hữu Apps Script phải chấp thuận các quyền được yêu cầu để backend gọi Supabase. Nếu không thấy hộp thoại quyền, mở liên kết **Nhấp vào đây để cấp quyền** trong nhật ký thực thi.
+5. Chọn **Deploy → New deployment → Web app**, đặt **Execute as: Me** và cấp quyền truy cập công khai (**Anyone**) để khách có thể gửi yêu cầu thuê.
+6. Sao chép URL triển khai có đuôi `/exec`. Không công khai Apps Script editor cho khách.
+7. Điền URL triển khai vào `apiUrl` trong `config.js`, rồi push lại để publish. Đây là URL public của API, không phải credential. Cấu hình này là bắt buộc để mọi khách truy cập trên thiết bị khác nhau đều tải được dịch vụ và gửi đơn.
    - Nếu cần thử riêng trên một máy, có thể dán URL ở **Quản trị**. URL đó chỉ được lưu trong `localStorage` của trình duyệt hiện tại; nó không thay thế bước cấu hình `config.js` cho khách.
-7. Kiểm tra API đọc công khai bằng cách mở URL này, thay `WEB_APP_URL` bằng URL `/exec`:
+8. Kiểm tra API đọc công khai bằng cách mở URL này, thay `WEB_APP_URL` bằng URL `/exec`:
    `WEB_APP_URL?action=public&callback=loaCallback_123_1`
    Kết quả phải là một lệnh gọi callback JavaScript có `ok: true`.
 
-Script dùng lại các tab `Services`, `Bookings`, `Users`, `Settings` của ứng dụng. Các tab mới `WebsitePosts`, `WebsiteReviews`, `WebsiteGallery` được tạo khi có nội dung tương ứng; ảnh giao/thu trong tab `Photos` của ứng dụng không được đưa công khai lên web. Header tiếng Việt đã có trong ứng dụng được ánh xạ sang schema chuẩn khi đọc/ghi.
+Sau lần chuyển dữ liệu cũ (nếu có), ứng dụng chỉ đọc/ghi các tab `Services`, `Bookings`, `Users` của Google Sheets. Nội dung trang, bài viết, đánh giá, thư viện ảnh lưu ở Supabase; ảnh giao/thu trong tab `Photos` của ứng dụng không được đưa công khai lên web. Thông tin giới thiệu/liên hệ lưu trong bảng `website_settings`. Lần đầu admin mở CMS sau khi cấu hình Supabase sẽ tự chuyển các bài viết, đánh giá, ảnh và cài đặt cũ trong Google Sheets sang database một lần.
 
 Đơn web ghi vào `Bookings` với `status = Chưa giao`, người tạo/người phụ trách `KH đặt Online`, số điện thoại giữ số 0 đầu và `services_info` ở dạng JSON tương thích ứng dụng.
 
-## 2. Thiết lập tài khoản quản trị
+## 3. Thiết lập tài khoản quản trị
 
 Tạo/kiểm tra user trong tab `Users` của app. User phải đang hoạt động và có role `admin` hoặc `super_admin`. Có thể tạo tài khoản quản trị đầu tiên bằng công cụ quản lý người dùng của app. Đăng nhập website bằng chính username/password đó.
 
@@ -37,7 +52,7 @@ Trong khu vực quản trị website:
 
 - **Bài viết:** tạo, xem danh sách, sửa và xóa bài; nhập tiêu đề, mô tả, nội dung, liên kết và ảnh bìa HTTPS.
 - **Đánh giá:** thêm, sửa, xóa tên khách hàng, dịch vụ và nội dung đánh giá.
-- **Thư viện ảnh:** quản lý ảnh bằng URL HTTPS công khai và chú thích; website không tải ảnh lên Google Drive.
+- **Thư viện ảnh:** chọn tệp ảnh để tải trực tiếp lên Supabase Storage; URL được tạo và lưu tự động. Ảnh bìa bài viết cũng dùng kho này.
 - **Dịch vụ:** thêm/sửa thông tin và giá dịch vụ. “Ngừng dịch vụ” sẽ ẩn dịch vụ khỏi trang đặt thuê nhưng giữ dữ liệu trong lịch sử đơn.
 - **Thông tin trang:** sửa tên doanh nghiệp, hotline, địa chỉ, khu vực phục vụ, giờ phục vụ, email và các đoạn giới thiệu/định hướng.
 - **Người dùng:** tạo tài khoản `admin`/`user` và khóa/mở khóa user. Không thể tự khóa tài khoản hiện tại hoặc khóa admin đang hoạt động cuối cùng.
@@ -47,7 +62,7 @@ Sau khi cập nhật `apps-script/Code.gs`, phải dán mã mới vào Apps Scri
 
 Mật khẩu mới được lưu SHA-256, không gửi mật khẩu/hash xuống endpoint đọc công khai. Đăng nhập tạo token thời hạn tối đa 6 giờ. Tab `Users` hiện có thể chứa mật khẩu thô do cơ chế tương thích của app; nên đăng nhập và đổi các mật khẩu cũ sang mật khẩu mới để chúng được lưu hash. Dùng mật khẩu riêng, mạnh cho từng tài khoản.
 
-## 3. Đưa website lên GitHub Pages
+## 4. Đưa website lên GitHub Pages
 
 1. Tạo repository mới trên GitHub, ví dụ `web-cho-thue-loa`. Nếu dùng GitHub Free, chọn **Public** để dùng Pages miễn phí. Lý tưởng nhất là không chọn tạo README, `.gitignore` hoặc license vì thư mục website đã có sẵn các file đó. Nếu bạn đã tạo README trên GitHub thì vẫn dùng được — làm theo mục “Đã tạo repository/README trước” bên dưới.
 2. Nếu đã triển khai Apps Script, điền URL `/exec` vào `apiUrl` trong `config.js` trước khi đưa mã lên GitHub. Nếu chưa điền, trang mẫu vẫn mở nhưng khách chưa thể tải dịch vụ hoặc gửi đơn.

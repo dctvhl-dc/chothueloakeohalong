@@ -31,6 +31,7 @@ function doGet(e) {
     return ContentService.createTextOutput(callback + "(" + JSON.stringify(result) + ");")
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   } catch (error) {
+    console.error("Public data request failed: " + safeMessage_(error));
     return ContentService.createTextOutput(callback + "(" + JSON.stringify({ ok: false, error: "Không tải được dữ liệu." }) + ");")
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
@@ -115,6 +116,9 @@ function handleAction_(action, data, token) {
     case "saveContent":
       requireAdmin_(token);
       return saveContent_(data);
+    case "uploadImage":
+      requireAdmin_(token);
+      return uploadImage_(data);
     case "saveSettings":
       requireAdmin_(token);
       return saveSettings_(data);
@@ -141,6 +145,7 @@ function handleAction_(action, data, token) {
 
 function publicData_() {
   const ss = spreadsheet_();
+  const cms = supabasePublicData_();
   return {
     ok: true,
     services: rowsAsObjects_(ss, "Services").filter(function (row) {
@@ -148,9 +153,9 @@ function publicData_() {
     }).map(function (row) {
       return { id: row.id || "", name: row.name || "", price: row.price || "", description: row.description || "", status: row.status || "" };
     }),
-    posts: rowsAsObjects_(ss, "WebsitePosts").filter(isActiveRow_).sort(newestFirst_).slice(0, 12),
-    reviews: rowsAsObjects_(ss, "WebsiteReviews").filter(isActiveRow_).sort(newestFirst_).slice(0, 12),
-    gallery: rowsAsObjects_(ss, "WebsiteGallery").filter(isActiveRow_).sort(newestFirst_).slice(0, 24),
+    posts: cms.posts,
+    reviews: cms.reviews,
+    gallery: cms.gallery,
     settings: settings_()
   };
 }
@@ -262,25 +267,21 @@ function requireAdmin_(token) {
 
 function saveContent_(data) {
   const type = clean_(data.type, 20);
-  const ss = spreadsheet_();
   if (type === "setting") {
     const key = clean_(data.key, 50).toLowerCase();
     if (PUBLIC_SETTING_KEYS.indexOf(key) < 0) throw new Error("Hãy dùng một khóa thông tin doanh nghiệp được hỗ trợ.");
-    const sheet = ensureSheet_(ss, "Settings", ["key", "value"]);
-    upsertByKey_(sheet, "key", "value", key, clean_(data.value, 2000));
+    saveSettings_({ settings: { [key]: data.value } });
     return { ok: true };
   }
+  if (type === "service") return saveService_(data);
   const mapping = {
-    post: { sheet: "WebsitePosts", headers: ["id", "title", "summary", "content", "url", "image_url", "created_at", "status"] },
-    review: { sheet: "WebsiteReviews", headers: ["id", "author", "content", "title", "created_at", "status"] },
-    gallery: { sheet: "WebsiteGallery", headers: ["id", "title", "image_url", "created_at", "status"] },
-    service: { sheet: "Services", headers: ["id", "name", "price", "description", "status"] }
+    post: true,
+    review: true,
+    gallery: true
   }[type];
   if (!mapping) throw new Error("Loại nội dung không hợp lệ.");
-  const sheet = ensureSheet_(ss, mapping.sheet, mapping.headers);
   const id = clean_(data.id, 100) || Utilities.getUuid();
-  const existing = findRecordRow_(sheet, id);
-  const row = { id: id, created_at: existing ? existing.created_at : new Date().toISOString(), status: "Hoạt động" };
+  const row = { id: id, kind: type, status: "published", updated_at: new Date().toISOString() };
   if (type === "post") {
     row.title = clean_(data.title, 150);
     row.summary = clean_(data.summary, 500);
@@ -296,25 +297,39 @@ function saveContent_(data) {
   } else if (type === "gallery") {
     row.title = clean_(data.title, 150);
     row.image_url = cleanHttpsUrl_(data.image_url, 1000);
-    if (!row.title || !row.image_url) throw new Error("Tên ảnh và URL ảnh HTTPS/HTTP hợp lệ là bắt buộc.");
-  } else {
-    row.name = clean_(data.name, 150);
-    row.price = clean_(data.price, 50);
-    row.description = clean_(data.description, 1000);
-    if (!row.name) throw new Error("Tên dịch vụ không được để trống.");
-    if (existing && !isActive_(existing.status)) row.status = "Hoạt động";
+    if (!row.title || !row.image_url) throw new Error("Tên ảnh và ảnh đã tải lên là bắt buộc.");
   }
-  writeRecord_(sheet, mapping.headers, row, existing);
+  supabaseRequest_("website_content?on_conflict=id", "post", row, "resolution=merge-duplicates,return=representation");
+  return { ok: true, id: id };
+}
+
+function saveService_(data) {
+  const ss = spreadsheet_();
+  const headers = ["id", "name", "price", "description", "status"];
+  const sheet = ensureSheet_(ss, "Services", headers);
+  const id = clean_(data.id, 100) || Utilities.getUuid();
+  const existing = findRecordRow_(sheet, id);
+  const row = {
+    id: id,
+    name: clean_(data.name, 150),
+    price: clean_(data.price, 50),
+    description: clean_(data.description, 1000),
+    status: existing && !isActive_(existing.status) ? "Hoạt động" : (existing ? existing.status : "Hoạt động")
+  };
+  if (!row.name) throw new Error("Tên dịch vụ không được để trống.");
+  writeRecord_(sheet, headers, row, existing);
   return { ok: true, id: id };
 }
 
 function listContent_() {
+  migrateLegacyContentOnce_();
   const ss = spreadsheet_();
+  const records = supabaseRequest_("website_content?select=*&order=created_at.desc", "get") || [];
   return {
     ok: true,
-    posts: pickFields_(rowsAsObjects_(ss, "WebsitePosts").sort(newestFirst_), ["id", "title", "summary", "content", "url", "image_url", "created_at", "status"]),
-    reviews: pickFields_(rowsAsObjects_(ss, "WebsiteReviews").sort(newestFirst_), ["id", "author", "content", "title", "created_at", "status"]),
-    gallery: pickFields_(rowsAsObjects_(ss, "WebsiteGallery").sort(newestFirst_), ["id", "title", "image_url", "created_at", "status"]),
+    posts: records.filter(function (row) { return row.kind === "post"; }),
+    reviews: records.filter(function (row) { return row.kind === "review"; }),
+    gallery: records.filter(function (row) { return row.kind === "gallery"; }),
     services: pickFields_(rowsAsObjects_(ss, "Services"), ["id", "name", "price", "description", "status"]),
     settings: settings_()
   };
@@ -323,11 +338,11 @@ function listContent_() {
 function saveSettings_(data) {
   const values = data.settings;
   if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error("Dữ liệu thông tin trang không hợp lệ.");
-  const sheet = ensureSheet_(spreadsheet_(), "Settings", ["key", "value"]);
-  Object.keys(values).forEach(function (key) {
+  const rows = Object.keys(values).map(function (key) {
     if (PUBLIC_SETTING_KEYS.indexOf(key) < 0) throw new Error("Có khóa thông tin trang không được hỗ trợ.");
-    upsertByKey_(sheet, "key", "value", key, clean_(values[key], 2000));
+    return { key: key, value: clean_(values[key], 2000), updated_at: new Date().toISOString() };
   });
+  if (rows.length) supabaseRequest_("website_settings?on_conflict=key", "post", rows, "resolution=merge-duplicates");
   return { ok: true };
 }
 
@@ -342,23 +357,40 @@ function pickFields_(rows, fields) {
 function deleteContent_(data) {
   const type = clean_(data.type, 20);
   const id = clean_(data.id, 100);
+  if (type === "service") return deleteService_(id);
+  if (["post", "review", "gallery"].indexOf(type) < 0 || !id) {
+    throw new Error("Loại nội dung hoặc mã bản ghi không hợp lệ.");
+  }
+  const existing = supabaseRequest_(
+    "website_content?id=eq." + encodeURIComponent(id) + "&kind=eq." + encodeURIComponent(type) + "&select=id,image_url",
+    "get"
+  );
+  if (!existing || !existing.length) throw new Error("Không tìm thấy nội dung cần xóa.");
+  const rows = supabaseRequest_(
+    "website_content?id=eq." + encodeURIComponent(id) + "&kind=eq." + encodeURIComponent(type),
+    "delete",
+    null,
+    "return=representation"
+  );
+  if (!rows || !rows.length) throw new Error("Không tìm thấy nội dung cần xóa.");
+  const warning = existing[0].image_url
+    ? deleteUnusedStorageImage_(id, String(existing[0].image_url))
+    : "";
+  return { ok: true, warning: warning };
+}
+
+function deleteService_(id) {
+  if (!id) throw new Error("Thiếu mã dịch vụ.");
   const mapping = {
-    post: { sheet: "WebsitePosts", headers: ["id", "title", "summary", "content", "url", "image_url", "created_at", "status"] },
-    review: { sheet: "WebsiteReviews", headers: ["id", "author", "content", "title", "created_at", "status"] },
-    gallery: { sheet: "WebsiteGallery", headers: ["id", "title", "image_url", "created_at", "status"] },
-    service: { sheet: "Services", headers: ["id", "name", "price", "description", "status"] }
-  }[type];
-  if (!mapping || !id) throw new Error("Loại nội dung hoặc mã bản ghi không hợp lệ.");
+    sheet: "Services",
+    headers: ["id", "name", "price", "description", "status"]
+  };
   const sheet = ensureSheet_(spreadsheet_(), mapping.sheet, mapping.headers);
   const existing = findRecordRow_(sheet, id);
   if (!existing) throw new Error("Không tìm thấy nội dung cần xóa.");
-  if (type === "service") {
-    const statusColumn = findColumn_(existing.headers, sheet.getName(), "status");
-    if (statusColumn < 0) throw new Error("Không tìm thấy cột trạng thái dịch vụ.");
-    sheet.getRange(existing.rowNumber, statusColumn + 1).setValue("Ngừng");
-  } else {
-    sheet.deleteRow(existing.rowNumber);
-  }
+  const statusColumn = findColumn_(existing.headers, sheet.getName(), "status");
+  if (statusColumn < 0) throw new Error("Không tìm thấy cột trạng thái dịch vụ.");
+  sheet.getRange(existing.rowNumber, statusColumn + 1).setValue("Ngừng");
   return { ok: true };
 }
 
@@ -456,24 +488,192 @@ function importNews_(data) {
     if (title && titles.indexOf(title) < 0 && title.length > 5) titles.push(title);
   }
   if (!titles.length) throw new Error("Không tìm thấy tiêu đề bài viết công khai. Hãy thêm nội dung thủ công.");
-  const sheet = ensureSheet_(spreadsheet_(), "WebsitePosts", ["id", "title", "content", "url", "created_at", "status"]);
   titles.forEach(function (title) {
-    appendByHeaders_(sheet, ["id", "title", "content", "url", "created_at", "status"], {
-      id: Utilities.getUuid(), title: title, content: "", url: url,
-      created_at: new Date().toISOString(), status: "Hoạt động"
+    saveContent_({
+      type: "post",
+      title: title,
+      summary: "Bài viết được nhập từ Google Sites.",
+      content: title,
+      url: url
     });
   });
   return { ok: true, imported: titles.length };
 }
 
 function settings_() {
-  const rows = rowsAsObjects_(spreadsheet_(), "Settings");
   const result = {};
+  const rows = supabaseRequest_("website_settings?select=key,value", "get") || [];
   rows.forEach(function (row) {
-    const key = String(row.key || "").trim().toLowerCase();
+    const key = String(row.key || "");
     if (PUBLIC_SETTING_KEYS.indexOf(key) >= 0) result[key] = String(row.value || "");
   });
   return result;
+}
+
+function migrateLegacyContentOnce_() {
+  const properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty("SUPABASE_CONTENT_MIGRATED") === "true") return;
+  const ss = spreadsheet_();
+  const collections = [
+    { sheet: "WebsitePosts", kind: "post" },
+    { sheet: "WebsiteReviews", kind: "review" },
+    { sheet: "WebsiteGallery", kind: "gallery" }
+  ];
+  collections.forEach(function (collection) {
+    const records = rowsAsObjects_(ss, collection.sheet).map(function (item) {
+      const row = {
+        id: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(item.id || ""))
+          ? String(item.id)
+          : Utilities.getUuid(),
+        kind: collection.kind,
+        title: clean_(item.title, 150),
+        summary: clean_(item.summary, 500),
+        content: clean_(item.content, 10000),
+        url: cleanHttpUrl_(item.url, 1000),
+        image_url: cleanHttpsUrl_(item.image_url, 1000),
+        author: clean_(item.author, 100),
+        status: isActiveRow_(item) ? "published" : "draft"
+      };
+      if (/^\d{4}-\d{2}-\d{2}T/.test(String(item.created_at || ""))) {
+        row.created_at = item.created_at;
+        row.updated_at = item.created_at;
+      }
+      return row;
+    });
+    if (records.length) {
+      supabaseRequest_("website_content?on_conflict=id", "post", records, "resolution=merge-duplicates");
+    }
+  });
+  const settings = {};
+  rowsAsObjects_(ss, "Settings").forEach(function (row) {
+    const key = String(row.key || "").trim().toLowerCase();
+    if (PUBLIC_SETTING_KEYS.indexOf(key) >= 0) settings[key] = row.value || "";
+  });
+  const settingRows = Object.keys(settings).map(function (key) {
+    return { key: key, value: clean_(settings[key], 2000) };
+  });
+  if (settingRows.length) {
+    supabaseRequest_("website_settings?on_conflict=key", "post", settingRows, "resolution=merge-duplicates");
+  }
+  properties.setProperty("SUPABASE_CONTENT_MIGRATED", "true");
+}
+
+function supabasePublicData_() {
+  const fields = "select=id,kind,title,summary,content,url,image_url,author,created_at,status";
+  function published(kind, limit) {
+    return supabaseRequest_(
+      "website_content?" + fields + "&kind=eq." + kind + "&status=eq.published&order=created_at.desc&limit=" + limit,
+      "get"
+    ) || [];
+  }
+  return {
+    posts: published("post", 12),
+    reviews: published("review", 12),
+    gallery: published("gallery", 24)
+  };
+}
+
+function uploadImage_(data) {
+  const mimeType = clean_(data.mimeType, 50).toLowerCase();
+  const extensions = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif"
+  };
+  if (!extensions[mimeType]) throw new Error("Chỉ nhận ảnh JPEG, PNG, WebP hoặc GIF.");
+  const base64 = String(data.base64 || "").replace(/^data:[^,]+;base64,/, "");
+  if (!base64 || base64.length > 5600000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    throw new Error("Ảnh không hợp lệ hoặc vượt quá 4 MB.");
+  }
+  const bytes = Utilities.base64Decode(base64);
+  if (!bytes.length || bytes.length > 4194304) throw new Error("Ảnh không được vượt quá 4 MB.");
+  const fileName = Utilities.getUuid() + "." + extensions[mimeType];
+  const endpoint = supabaseConfig_().url + "/storage/v1/object/website-images/" + fileName;
+  const response = UrlFetchApp.fetch(endpoint, {
+    method: "post",
+    contentType: mimeType,
+    payload: Utilities.newBlob(bytes, mimeType, fileName),
+    headers: supabaseHeaders_(),
+    muteHttpExceptions: true
+  });
+  const status = response.getResponseCode();
+  if (status < 200 || status >= 300) {
+    throw new Error("Không tải được ảnh lên Supabase (HTTP " + status + ").");
+  }
+  return {
+    ok: true,
+    url: supabaseConfig_().url + "/storage/v1/object/public/website-images/" + fileName
+  };
+}
+
+function deleteUnusedStorageImage_(deletedId, imageUrl) {
+  const config = supabaseConfig_();
+  const publicPrefix = config.url + "/storage/v1/object/public/website-images/";
+  if (imageUrl.indexOf(publicPrefix) !== 0) return "";
+  const path = imageUrl.slice(publicPrefix.length);
+  if (!/^[a-zA-Z0-9._-]+$/.test(path)) return "Nội dung đã xóa; URL ảnh không hợp lệ nên chưa thể dọn tệp trong kho.";
+  try {
+    const references = supabaseRequest_(
+      "website_content?select=id&image_url=eq." + encodeURIComponent(imageUrl) +
+        "&id=neq." + encodeURIComponent(deletedId) + "&limit=1",
+      "get"
+    ) || [];
+    if (references.length) return "";
+    const response = UrlFetchApp.fetch(
+      config.url + "/storage/v1/object/website-images/" + path,
+      { method: "delete", headers: supabaseHeaders_(), muteHttpExceptions: true }
+    );
+    const status = response.getResponseCode();
+    return status >= 200 && status < 300
+      ? ""
+      : "Nội dung đã xóa nhưng tệp ảnh chưa được dọn khỏi Supabase Storage (HTTP " + status + ").";
+  } catch (error) {
+    return "Nội dung đã xóa nhưng ảnh chưa được dọn khỏi Supabase Storage: " + safeMessage_(error);
+  }
+}
+
+function supabaseConfig_() {
+  const properties = PropertiesService.getScriptProperties();
+  const url = String(properties.getProperty("SUPABASE_URL") || "").replace(/\/+$/, "");
+  const key = String(properties.getProperty("SUPABASE_SECRET_KEY") || "");
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url) || !key) {
+    throw new Error("Chưa cấu hình SUPABASE_URL và SUPABASE_SECRET_KEY trong Script Properties.");
+  }
+  return { url: url, key: key };
+}
+
+function supabaseHeaders_() {
+  const config = supabaseConfig_();
+  return {
+    apikey: config.key
+  };
+}
+
+function supabaseRequest_(path, method, payload, prefer) {
+  const config = supabaseConfig_();
+  const options = {
+    method: method,
+    headers: supabaseHeaders_(),
+    muteHttpExceptions: true
+  };
+  if (payload !== null && payload !== undefined) {
+    options.contentType = "application/json";
+    options.payload = JSON.stringify(payload);
+  }
+  if (prefer) options.headers.Prefer = prefer;
+  const response = UrlFetchApp.fetch(config.url + "/rest/v1/" + path, options);
+  const status = response.getResponseCode();
+  const body = response.getContentText();
+  if (status < 200 || status >= 300) {
+    throw new Error("Supabase từ chối yêu cầu (HTTP " + status + "): " + clean_(body, 160));
+  }
+  return body ? JSON.parse(body) : null;
+}
+
+function authorizeSupabase() {
+  const rows = supabaseRequest_("website_content?select=id&limit=1", "get") || [];
+  console.log("Supabase connection authorized; content rows: " + rows.length);
 }
 
 function spreadsheet_() {

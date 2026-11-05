@@ -73,7 +73,7 @@
         pendingRequests.delete(id);
         form.remove();
         reject(new Error("Máy chủ chưa phản hồi. Hãy thử lại hoặc liên hệ hotline."));
-      }, 20000);
+      }, action === "uploadImage" ? 60000 : 20000);
       pendingRequests.set(id, (message) => {
         window.clearTimeout(timeout);
         form.remove();
@@ -439,7 +439,7 @@
       ["summary", "Mô tả ngắn", "textarea", false],
       ["content", "Nội dung bài viết", "textarea", true],
       ["url", "Link bài viết (nếu có)", "url", false],
-      ["image_url", "URL ảnh bìa (nếu có)", "url", false]
+      ["image_url", "Ảnh bìa (nếu có)", "image", false]
     ],
     reviews: [
       ["author", "Tên khách hàng", "text", true],
@@ -448,7 +448,7 @@
     ],
     gallery: [
       ["title", "Tên / chú thích ảnh", "text", true],
-      ["image_url", "URL ảnh công khai (HTTPS)", "url", true]
+      ["image_url", "Tải ảnh lên thư viện", "image", true]
     ],
     services: [
       ["name", "Tên dịch vụ", "text", true],
@@ -463,6 +463,41 @@
   function makeField(name, labelText, kind, required) {
     const label = document.createElement("label");
     label.textContent = labelText;
+    if (kind === "image") {
+      const file = document.createElement("input");
+      file.type = "file";
+      file.name = "image_file";
+      file.accept = "image/jpeg,image/png,image/webp,image/gif";
+      file.required = false;
+      const currentUrl = document.createElement("input");
+      currentUrl.type = "hidden";
+      currentUrl.name = name;
+      const preview = document.createElement("img");
+      preview.className = "cms-image-preview";
+      preview.alt = "Xem trước ảnh";
+      preview.hidden = true;
+      preview.style.maxWidth = "100%";
+      preview.style.maxHeight = "220px";
+      preview.style.objectFit = "contain";
+      preview.style.marginTop = "8px";
+      file.addEventListener("change", () => {
+        const selected = file.files && file.files[0];
+        if (!selected) return;
+        preview.src = URL.createObjectURL(selected);
+        preview.hidden = false;
+      });
+      label.append(file, currentUrl, preview);
+      if (!required) {
+        const help = document.createElement("small");
+        help.textContent = "Tối đa 4 MB, định dạng JPEG, PNG, WebP hoặc GIF.";
+        label.append(help);
+      } else {
+        const help = document.createElement("small");
+        help.textContent = "Ảnh sẽ được lưu vào Supabase Storage. Tối đa 4 MB.";
+        label.append(help);
+      }
+      return label;
+    }
     const input = kind === "textarea" ? document.createElement("textarea") : document.createElement("input");
     input.name = name;
     if (kind !== "textarea") input.type = kind;
@@ -476,13 +511,25 @@
   function clearRecordForm(form) {
     form.reset();
     form.elements.namedItem("id").value = "";
+    const preview = form.querySelector(".cms-image-preview");
+    if (preview) {
+      preview.removeAttribute("src");
+      preview.hidden = true;
+    }
     form.querySelector("[type=submit]").textContent = "Thêm mới";
     form.querySelector(".cancel-edit").hidden = true;
   }
 
   function startEditing(form, record) {
     form.elements.namedItem("id").value = record.id || "";
-    cmsFields[activeCmsTab].forEach(([name]) => { form.elements.namedItem(name).value = record[name] || ""; });
+    cmsFields[activeCmsTab].forEach(([name]) => {
+      form.elements.namedItem(name).value = record[name] || "";
+      if (name === "image_url" && record[name]) {
+        const preview = form.querySelector(".cms-image-preview");
+        preview.src = record[name];
+        preview.hidden = false;
+      }
+    });
     form.querySelector("[type=submit]").textContent = "Lưu chỉnh sửa";
     form.querySelector(".cancel-edit").hidden = false;
     form.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -534,8 +581,8 @@
           if (!window.confirm(prompt)) return;
           remove.disabled = true;
           try {
-            await postApi("deleteContent", { type: contentApiTypes[type], id: record.id }, token());
-            statusText(adminStatus, type === "services" ? "Đã ngừng dịch vụ." : "Đã xóa nội dung.");
+            const result = await postApi("deleteContent", { type: contentApiTypes[type], id: record.id }, token());
+            statusText(adminStatus, result.warning || (type === "services" ? "Đã ngừng dịch vụ." : "Đã xóa nội dung."), Boolean(result.warning));
             await loadContentRecords(type, list);
             getPublicData().then(paintPublicData).catch(() => {});
           } catch (error) {
@@ -635,8 +682,30 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       save.disabled = true;
-      const data = Object.fromEntries(new FormData(form).entries());
+      const data = Object.fromEntries(cmsFields[activeCmsTab].map(([name]) => [
+        name,
+        form.elements.namedItem(name).value
+      ]));
       try {
+        const imageField = form.elements.namedItem("image_file");
+        const image = imageField && imageField.files && imageField.files[0];
+        if (image) {
+          if (image.size > 4 * 1024 * 1024) throw new Error("Ảnh không được vượt quá 4 MB.");
+          if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(image.type)) {
+            throw new Error("Chỉ nhận ảnh JPEG, PNG, WebP hoặc GIF.");
+          }
+          statusText(adminStatus, "Đang tải ảnh lên thư viện…");
+          const base64 = await fileToBase64(image);
+          const uploaded = await postApi("uploadImage", {
+            base64,
+            mimeType: image.type,
+            fileName: image.name
+          }, token());
+          data.image_url = uploaded.url;
+        }
+        if (activeCmsTab === "gallery" && !data.image_url) {
+          throw new Error("Vui lòng chọn ảnh để tải lên.");
+        }
         await postApi("saveContent", { ...data, type: contentApiTypes[type] }, token());
         statusText(adminStatus, data.id ? "Đã cập nhật nội dung." : "Đã thêm nội dung.");
         clearRecordForm(form);
@@ -650,6 +719,20 @@
     });
     cmsRoot.append(form, listHeading, list);
     loadContentRecords(type, list);
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Không đọc được tệp ảnh đã chọn."));
+      reader.onload = () => {
+        const result = String(reader.result || "");
+        const separator = result.indexOf(",");
+        if (separator < 0) reject(new Error("Tệp ảnh không đúng định dạng."));
+        else resolve(result.slice(separator + 1));
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   document.querySelectorAll(".admin-tabs button").forEach((button) => button.addEventListener("click", () => showCmsTab(button.dataset.tab)));
