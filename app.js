@@ -375,13 +375,6 @@
 
   const adminStatus = document.getElementById("admin-status");
   const endpointInput = document.getElementById("admin-endpoint");
-  if (config.apiUrl) endpointInput.value = config.apiUrl;
-  else {
-    try { endpointInput.value = localStorage.getItem("loa-api-url") || ""; } catch (_) { /* Storage may be disabled. */ }
-  }
-  endpointInput.addEventListener("change", () => {
-    try { localStorage.setItem("loa-api-url", endpointInput.value.trim()); } catch (_) { /* Storage may be disabled. */ }
-  });
   function token() {
     try { return sessionStorage.getItem("loa-admin-token") || ""; } catch (_) { return ""; }
   }
