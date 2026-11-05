@@ -16,7 +16,9 @@ const CONFIG = {
 };
 const PUBLIC_SETTING_KEYS = [
   "company_name", "hotline", "hotline_2", "address", "service_area",
-  "about", "direction", "mission", "business_hours", "email"
+  "about", "direction", "mission", "business_hours", "email", "hero_title",
+  "hero_subtitle", "about_heading", "booking_title", "booking_description",
+  "gallery_heading", "news_heading", "contact_heading", "contact_description"
 ];
 
 function doGet(e) {
@@ -113,6 +115,15 @@ function handleAction_(action, data, token) {
     case "saveContent":
       requireAdmin_(token);
       return saveContent_(data);
+    case "saveSettings":
+      requireAdmin_(token);
+      return saveSettings_(data);
+    case "listContent":
+      requireAdmin_(token);
+      return listContent_();
+    case "deleteContent":
+      requireAdmin_(token);
+      return deleteContent_(data);
     case "listUsers":
       requireAdmin_(token);
       return listUsers_();
@@ -251,26 +262,103 @@ function requireAdmin_(token) {
 
 function saveContent_(data) {
   const type = clean_(data.type, 20);
-  const title = clean_(data.title, 150);
-  const body = clean_(data.body, 4000);
-  if (!title || !body) throw new Error("Tiêu đề và nội dung không được để trống.");
   const ss = spreadsheet_();
   if (type === "setting") {
-    const key = title.toLowerCase().replace(/\s+/g, "_");
+    const key = clean_(data.key, 50).toLowerCase();
     if (PUBLIC_SETTING_KEYS.indexOf(key) < 0) throw new Error("Hãy dùng một khóa thông tin doanh nghiệp được hỗ trợ.");
     const sheet = ensureSheet_(ss, "Settings", ["key", "value"]);
-    upsertByKey_(sheet, "key", "value", title, body);
+    upsertByKey_(sheet, "key", "value", key, clean_(data.value, 2000));
     return { ok: true };
   }
   const mapping = {
-    post: { sheet: "WebsitePosts", headers: ["id", "title", "content", "url", "created_at", "status"] },
+    post: { sheet: "WebsitePosts", headers: ["id", "title", "summary", "content", "url", "image_url", "created_at", "status"] },
     review: { sheet: "WebsiteReviews", headers: ["id", "author", "content", "title", "created_at", "status"] },
-    gallery: { sheet: "WebsiteGallery", headers: ["id", "title", "image_url", "created_at", "status"] }
+    gallery: { sheet: "WebsiteGallery", headers: ["id", "title", "image_url", "created_at", "status"] },
+    service: { sheet: "Services", headers: ["id", "name", "price", "description", "status"] }
   }[type];
   if (!mapping) throw new Error("Loại nội dung không hợp lệ.");
   const sheet = ensureSheet_(ss, mapping.sheet, mapping.headers);
-  const row = { id: Utilities.getUuid(), title: title, content: body, author: title, image_url: body, url: /^https?:\/\//i.test(body) ? body : "", created_at: new Date().toISOString(), status: "Hoạt động" };
-  appendByHeaders_(sheet, mapping.headers, row);
+  const id = clean_(data.id, 100) || Utilities.getUuid();
+  const existing = findRecordRow_(sheet, id);
+  const row = { id: id, created_at: existing ? existing.created_at : new Date().toISOString(), status: "Hoạt động" };
+  if (type === "post") {
+    row.title = clean_(data.title, 150);
+    row.summary = clean_(data.summary, 500);
+    row.content = clean_(data.content, 10000);
+    row.url = cleanHttpUrl_(data.url, 1000);
+    row.image_url = cleanHttpsUrl_(data.image_url, 1000);
+    if (!row.title || !row.content) throw new Error("Tiêu đề và nội dung bài viết không được để trống.");
+  } else if (type === "review") {
+    row.title = clean_(data.title, 150);
+    row.author = clean_(data.author, 100);
+    row.content = clean_(data.content, 2000);
+    if (!row.author || !row.content) throw new Error("Tên khách hàng và nội dung đánh giá không được để trống.");
+  } else if (type === "gallery") {
+    row.title = clean_(data.title, 150);
+    row.image_url = cleanHttpsUrl_(data.image_url, 1000);
+    if (!row.title || !row.image_url) throw new Error("Tên ảnh và URL ảnh HTTPS/HTTP hợp lệ là bắt buộc.");
+  } else {
+    row.name = clean_(data.name, 150);
+    row.price = clean_(data.price, 50);
+    row.description = clean_(data.description, 1000);
+    if (!row.name) throw new Error("Tên dịch vụ không được để trống.");
+    if (existing && !isActive_(existing.status)) row.status = "Hoạt động";
+  }
+  writeRecord_(sheet, mapping.headers, row, existing);
+  return { ok: true, id: id };
+}
+
+function listContent_() {
+  const ss = spreadsheet_();
+  return {
+    ok: true,
+    posts: pickFields_(rowsAsObjects_(ss, "WebsitePosts").sort(newestFirst_), ["id", "title", "summary", "content", "url", "image_url", "created_at", "status"]),
+    reviews: pickFields_(rowsAsObjects_(ss, "WebsiteReviews").sort(newestFirst_), ["id", "author", "content", "title", "created_at", "status"]),
+    gallery: pickFields_(rowsAsObjects_(ss, "WebsiteGallery").sort(newestFirst_), ["id", "title", "image_url", "created_at", "status"]),
+    services: pickFields_(rowsAsObjects_(ss, "Services"), ["id", "name", "price", "description", "status"]),
+    settings: settings_()
+  };
+}
+
+function saveSettings_(data) {
+  const values = data.settings;
+  if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error("Dữ liệu thông tin trang không hợp lệ.");
+  const sheet = ensureSheet_(spreadsheet_(), "Settings", ["key", "value"]);
+  Object.keys(values).forEach(function (key) {
+    if (PUBLIC_SETTING_KEYS.indexOf(key) < 0) throw new Error("Có khóa thông tin trang không được hỗ trợ.");
+    upsertByKey_(sheet, "key", "value", key, clean_(values[key], 2000));
+  });
+  return { ok: true };
+}
+
+function pickFields_(rows, fields) {
+  return rows.map(function (row) {
+    const result = {};
+    fields.forEach(function (field) { result[field] = row[field] || ""; });
+    return result;
+  });
+}
+
+function deleteContent_(data) {
+  const type = clean_(data.type, 20);
+  const id = clean_(data.id, 100);
+  const mapping = {
+    post: { sheet: "WebsitePosts", headers: ["id", "title", "summary", "content", "url", "image_url", "created_at", "status"] },
+    review: { sheet: "WebsiteReviews", headers: ["id", "author", "content", "title", "created_at", "status"] },
+    gallery: { sheet: "WebsiteGallery", headers: ["id", "title", "image_url", "created_at", "status"] },
+    service: { sheet: "Services", headers: ["id", "name", "price", "description", "status"] }
+  }[type];
+  if (!mapping || !id) throw new Error("Loại nội dung hoặc mã bản ghi không hợp lệ.");
+  const sheet = ensureSheet_(spreadsheet_(), mapping.sheet, mapping.headers);
+  const existing = findRecordRow_(sheet, id);
+  if (!existing) throw new Error("Không tìm thấy nội dung cần xóa.");
+  if (type === "service") {
+    const statusColumn = findColumn_(existing.headers, sheet.getName(), "status");
+    if (statusColumn < 0) throw new Error("Không tìm thấy cột trạng thái dịch vụ.");
+    sheet.getRange(existing.rowNumber, statusColumn + 1).setValue("Ngừng");
+  } else {
+    sheet.deleteRow(existing.rowNumber);
+  }
   return { ok: true };
 }
 
@@ -436,18 +524,61 @@ function appendByHeaders_(sheet, canonicalHeaders, object) {
   sheet.appendRow(values);
 }
 
+function findRecordRow_(sheet, id) {
+  if (sheet.getLastRow() < 2) return null;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(function (value) { return String(value).trim(); });
+  const idColumn = findColumn_(headers, sheet.getName(), "id");
+  if (idColumn < 0) throw new Error("Không tìm thấy cột mã nội dung.");
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getDisplayValues();
+  for (let index = 0; index < values.length; index++) {
+    if (String(values[index][idColumn]).trim() === id) {
+      const object = {};
+      headers.forEach(function (header, column) {
+        const key = canonicalHeader_(sheet.getName(), header) || header;
+        object[key] = values[index][column] || "";
+      });
+      return { rowNumber: index + 2, headers: headers, created_at: object.created_at || "", status: object.status || "" };
+    }
+  }
+  return null;
+}
+
+function writeRecord_(sheet, canonicalHeaders, object, existing) {
+  if (!existing) {
+    appendByHeaders_(sheet, canonicalHeaders, object);
+    return;
+  }
+  const sheetName = sheet.getName();
+  Object.keys(object).forEach(function (key) {
+    const column = findColumn_(existing.headers, sheetName, key);
+    if (column >= 0) sheet.getRange(existing.rowNumber, column + 1).setValue(object[key]);
+  });
+}
+
 function upsertByKey_(sheet, keyHeader, valueHeader, key, value) {
   const values = sheet.getDataRange().getDisplayValues();
   const headers = values[0].map(function (item) { return String(item).trim(); });
   const keyColumn = findColumn_(headers, sheet.getName(), keyHeader);
   const valueColumn = findColumn_(headers, sheet.getName(), valueHeader);
   for (let row = 1; row < values.length; row++) {
-    if (values[row][keyColumn] === key) {
+    if (String(values[row][keyColumn]).trim().toLowerCase() === String(key).trim().toLowerCase()) {
       sheet.getRange(row + 1, valueColumn + 1).setValue(value);
       return;
     }
   }
   appendByHeaders_(sheet, [keyHeader, valueHeader], { key: key, value: value });
+}
+
+function cleanHttpUrl_(value, maxLength) {
+  const url = clean_(value, maxLength);
+  if (url && !/^https?:\/\/[^\s]+$/i.test(url)) throw new Error("URL cần bắt đầu bằng http:// hoặc https://.");
+  return url;
+}
+
+function cleanHttpsUrl_(value, maxLength) {
+  const url = clean_(value, maxLength);
+  if (url && !/^https:\/\/[^\s]+$/i.test(url)) throw new Error("Ảnh cần có URL công khai bắt đầu bằng https://.");
+  return url;
 }
 
 function nextBookingId_(sheet) {

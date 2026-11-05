@@ -35,9 +35,15 @@ Tạo/kiểm tra user trong tab `Users` của app. User phải đang hoạt đ�
 
 Trong khu vực quản trị website:
 
-- **Nội dung:** thêm tin tức, đánh giá, ảnh (dán URL HTTPS vào nội dung) hoặc thông tin doanh nghiệp.
+- **Bài viết:** tạo, xem danh sách, sửa và xóa bài; nhập tiêu đề, mô tả, nội dung, liên kết và ảnh bìa HTTPS.
+- **Đánh giá:** thêm, sửa, xóa tên khách hàng, dịch vụ và nội dung đánh giá.
+- **Thư viện ảnh:** quản lý ảnh bằng URL HTTPS công khai và chú thích; website không tải ảnh lên Google Drive.
+- **Dịch vụ:** thêm/sửa thông tin và giá dịch vụ. “Ngừng dịch vụ” sẽ ẩn dịch vụ khỏi trang đặt thuê nhưng giữ dữ liệu trong lịch sử đơn.
+- **Thông tin trang:** sửa tên doanh nghiệp, hotline, địa chỉ, khu vực phục vụ, giờ phục vụ, email và các đoạn giới thiệu/định hướng.
 - **Người dùng:** tạo tài khoản `admin`/`user` và khóa/mở khóa user. Không thể tự khóa tài khoản hiện tại hoặc khóa admin đang hoạt động cuối cùng.
-- **Lấy bài viết:** nhập các tiêu đề h1/h2 mà Google Sites công khai cung cấp thành bài viết liên kết về trang gốc. Nếu Google Sites không trả tiêu đề trong HTML công khai, hãy thêm bài thủ công.
+- **Lấy bài viết từ Google Sites:** nhập tiêu đề h1/h2 công khai thành bài viết liên kết về trang gốc; có thể chỉnh nội dung nhập sau đó. Nếu Google Sites không trả tiêu đề trong HTML công khai, hãy thêm bài thủ công.
+
+Sau khi cập nhật `apps-script/Code.gs`, phải dán mã mới vào Apps Script project và cập nhật deployment Web app bằng **Deploy → Manage deployments → Edit → New version → Deploy**. Push frontend lên GitHub sẽ không tự cập nhật Apps Script.
 
 Mật khẩu mới được lưu SHA-256, không gửi mật khẩu/hash xuống endpoint đọc công khai. Đăng nhập tạo token thời hạn tối đa 6 giờ. Tab `Users` hiện có thể chứa mật khẩu thô do cơ chế tương thích của app; nên đăng nhập và đổi các mật khẩu cũ sang mật khẩu mới để chúng được lưu hash. Dùng mật khẩu riêng, mạnh cho từng tài khoản.
 

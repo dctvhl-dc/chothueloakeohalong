@@ -128,6 +128,15 @@
   function paintPublicData(data) {
     if (!data || !data.ok) return;
     const settings = data.settings || {};
+    if (settings.hero_title) document.querySelector(".hero-copy h1").textContent = settings.hero_title;
+    if (settings.hero_subtitle || settings.mission) document.querySelector(".hero-copy>p").textContent = settings.hero_subtitle || settings.mission;
+    if (settings.about_heading) document.querySelector(".about-copy h2").textContent = settings.about_heading;
+    if (settings.booking_title) document.querySelector(".booking-banner h2").textContent = settings.booking_title;
+    if (settings.booking_description) document.querySelector(".booking-banner p").textContent = settings.booking_description;
+    if (settings.gallery_heading) document.querySelector(".gallery-section h2").textContent = settings.gallery_heading;
+    if (settings.news_heading) document.querySelector(".news-section h2").textContent = settings.news_heading;
+    if (settings.contact_heading) document.querySelector(".contact-section h2").textContent = settings.contact_heading;
+    if (settings.contact_description) document.querySelector(".contact-section>div>p").textContent = settings.contact_description;
     if (settings.company_name) {
       document.querySelectorAll(".brand-name").forEach((node) => {
         node.firstChild.nodeValue = settings.company_name;
@@ -159,8 +168,30 @@
       const address = document.querySelector(".contact-details>div strong");
       address.textContent = settings.address || settings.service_area;
     }
+    if (settings.business_hours) {
+      let hours = document.getElementById("contact-hours");
+      if (!hours) {
+        hours = document.createElement("div");
+        hours.id = "contact-hours";
+        hours.innerHTML = "<small>GIỜ PHỤC VỤ</small><strong></strong>";
+        document.querySelector(".contact-details").append(hours);
+      }
+      hours.querySelector("strong").textContent = settings.business_hours;
+    }
+    if (settings.email) {
+      let email = document.getElementById("contact-email");
+      if (!email) {
+        email = document.createElement("a");
+        email.id = "contact-email";
+        email.innerHTML = "<small>EMAIL LIÊN HỆ</small><strong></strong>";
+        document.querySelector(".contact-details").append(email);
+      }
+      email.href = `mailto:${settings.email}`;
+      email.querySelector("strong").textContent = settings.email;
+    }
     if (settings.about) document.querySelector(".about-copy>p").textContent = settings.about;
-    if (Array.isArray(data.services) && data.services.length) {
+    if (settings.direction) document.querySelector(".about-copy>p:nth-of-type(2)").textContent = settings.direction;
+    if (Array.isArray(data.services)) {
       populateServices(data.services);
       const host = document.getElementById("service-list");
       host.replaceChildren(...data.services.slice(0, 9).map((service, index) => {
@@ -198,15 +229,25 @@
         card.append(art, info);
         return card;
       }));
-      document.getElementById("service-note").textContent = "Danh sách dịch vụ được đồng bộ từ Google Sheets.";
+      document.getElementById("service-note").textContent = data.services.length
+        ? "Danh sách dịch vụ được đồng bộ từ Google Sheets."
+        : "Hiện chưa có dịch vụ được đăng. Vui lòng liên hệ để được tư vấn.";
     }
-    if (Array.isArray(data.posts) && data.posts.length) {
+    if (Array.isArray(data.posts)) {
       const news = document.getElementById("news-list");
       news.replaceChildren(...data.posts.slice(0, 6).map((post, index) => {
         const article = document.createElement("article");
         article.className = "news-card";
         const art = document.createElement("div");
         art.className = `news-art news-art-${["one", "two", "three"][index % 3]}`;
+        if (/^https:\/\//i.test(post.image_url || "")) {
+          const image = document.createElement("img");
+          image.src = post.image_url;
+          image.alt = post.title || "Ảnh bài viết";
+          image.loading = "lazy";
+          image.decoding = "async";
+          art.append(image);
+        }
         const label = document.createElement("span");
         label.textContent = "CHUYỆN LOA, CHUYỆN HẠ LONG";
         const icon = document.createElement("b");
@@ -217,6 +258,9 @@
         meta.textContent = post.created_at || "TIN TỨC";
         const title = document.createElement("h3");
         title.textContent = post.title || "Bài viết";
+        const summary = document.createElement("p");
+        summary.className = "news-summary";
+        summary.textContent = post.summary || (post.content || "").slice(0, 180);
         const link = document.createElement("a");
         link.textContent = "Đọc bài viết ↗";
         if (post.url && /^https?:\/\//i.test(post.url)) {
@@ -224,22 +268,50 @@
           link.target = "_blank";
           link.rel = "noopener";
         } else link.href = "#news";
-        article.append(art, meta, title, link);
+        article.append(art, meta, title, summary);
+        if (post.content) {
+          const details = document.createElement("details");
+          const toggle = document.createElement("summary");
+          toggle.textContent = "Xem nội dung";
+          const content = document.createElement("p");
+          content.className = "news-full-content";
+          content.textContent = post.content;
+          details.append(toggle, content);
+          article.append(details);
+        }
+        if (post.url) article.append(link);
         return article;
       }));
     }
-    if (Array.isArray(data.reviews) && data.reviews.length) {
-      const review = data.reviews[0];
-      document.querySelector(".review-content blockquote").textContent = `“${review.content || review.title || ""}”`;
-      const reviewer = document.querySelector(".review-byline b");
-      reviewer.textContent = review.author || "Khách hàng tại Hạ Long";
+    if (Array.isArray(data.reviews)) {
+      const container = document.querySelector(".review-content");
+      const eyebrow = container.querySelector(".eyebrow");
+      const stars = container.querySelector(".review-stars");
+      const controls = container.querySelector(".review-controls");
+      stars.hidden = !data.reviews.length;
+      controls.hidden = !data.reviews.length;
+      const list = document.createElement("div");
+      list.className = "review-list";
+      data.reviews.slice(0, 6).forEach((review) => {
+        const card = document.createElement("article");
+        card.className = "review-item";
+        const quote = document.createElement("blockquote");
+        quote.textContent = `“${review.content || ""}”`;
+        const author = document.createElement("strong");
+        author.textContent = review.author || "Khách hàng";
+        const service = document.createElement("small");
+        service.textContent = review.title || "Khách hàng tại Hạ Long";
+        card.append(quote, author, service);
+        list.append(card);
+      });
+      container.replaceChildren(eyebrow, stars, list, controls);
     }
-    if (Array.isArray(data.gallery) && data.gallery.length) {
+    if (Array.isArray(data.gallery)) {
       const grid = document.querySelector(".gallery-grid");
       grid.replaceChildren(...data.gallery.slice(0, 8).map((item, index) => {
         const tile = document.createElement("a");
         tile.className = `gallery-tile gallery-${["one", "two", "three", "four"][index % 4]}`;
-        if (/^https?:\/\//i.test(item.image_url || "")) {
+        if (/^https:\/\//i.test(item.image_url || "")) {
           tile.classList.add("has-image");
           tile.href = item.image_url;
           tile.target = "_blank";
@@ -322,6 +394,7 @@
     });
     if (admin) statusText(adminStatus, `Đã đăng nhập: ${admin.full_name || admin.username}`);
     else statusText(adminStatus, "");
+    if (value) showCmsTab(activeCmsTab);
   }
   document.getElementById("admin-login").addEventListener("click", async () => {
     const username = document.getElementById("admin-user").value.trim();
@@ -338,13 +411,248 @@
     try { sessionStorage.removeItem("loa-admin-token"); } catch (_) { /* Session storage may be disabled. */ }
     setAdminLoggedIn(false);
   });
-  document.querySelectorAll(".admin-tabs button").forEach((button) => button.addEventListener("click", () => {
-    document.getElementById("content-form").style.display = button.dataset.tab === "content" ? "block" : "none";
-    document.getElementById("user-management").hidden = button.dataset.tab !== "users";
-    const importButton = document.getElementById("import-news");
-    importButton.hidden = button.dataset.tab !== "news";
-    if (button.dataset.tab === "users") loadUsers();
-  }));
+  let activeCmsTab = "posts";
+  const cmsRoot = document.getElementById("content-management");
+  const settingFields = [
+    ["hero_title", "Tiêu đề lớn đầu trang"],
+    ["hero_subtitle", "Mô tả đầu trang"],
+    ["about_heading", "Tiêu đề phần giới thiệu"],
+    ["company_name", "Tên doanh nghiệp"],
+    ["hotline", "Số điện thoại chính"],
+    ["hotline_2", "Số điện thoại phụ"],
+    ["address", "Địa chỉ"],
+    ["service_area", "Khu vực phục vụ"],
+    ["business_hours", "Giờ phục vụ"],
+    ["email", "Email liên hệ"],
+    ["about", "Giới thiệu doanh nghiệp"],
+    ["direction", "Định hướng phát triển"],
+    ["booking_title", "Tiêu đề phần đặt thuê"],
+    ["booking_description", "Mô tả phần đặt thuê"],
+    ["gallery_heading", "Tiêu đề thư viện ảnh"],
+    ["news_heading", "Tiêu đề tin tức"],
+    ["contact_heading", "Tiêu đề liên hệ"],
+    ["contact_description", "Mô tả liên hệ"]
+  ];
+  const cmsFields = {
+    posts: [
+      ["title", "Tiêu đề bài viết", "text", true],
+      ["summary", "Mô tả ngắn", "textarea", false],
+      ["content", "Nội dung bài viết", "textarea", true],
+      ["url", "Link bài viết (nếu có)", "url", false],
+      ["image_url", "URL ảnh bìa (nếu có)", "url", false]
+    ],
+    reviews: [
+      ["author", "Tên khách hàng", "text", true],
+      ["title", "Dịch vụ / tiêu đề (không bắt buộc)", "text", false],
+      ["content", "Nội dung đánh giá", "textarea", true]
+    ],
+    gallery: [
+      ["title", "Tên / chú thích ảnh", "text", true],
+      ["image_url", "URL ảnh công khai (HTTPS)", "url", true]
+    ],
+    services: [
+      ["name", "Tên dịch vụ", "text", true],
+      ["price", "Giá thuê", "text", false],
+      ["description", "Mô tả dịch vụ", "textarea", false]
+    ]
+  };
+  const recordCollections = { posts: "posts", reviews: "reviews", gallery: "gallery", services: "services" };
+  const contentApiTypes = { posts: "post", reviews: "review", gallery: "gallery", services: "service" };
+  const tabTitles = { posts: "Bài viết", reviews: "Đánh giá", gallery: "Thư viện ảnh", services: "Dịch vụ" };
+
+  function makeField(name, labelText, kind, required) {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    const input = kind === "textarea" ? document.createElement("textarea") : document.createElement("input");
+    input.name = name;
+    if (kind !== "textarea") input.type = kind;
+    input.required = required;
+    if (kind === "textarea") input.rows = name === "content" ? 7 : 3;
+    if (name === "image_url" || name === "url") input.maxLength = 1000;
+    label.append(input);
+    return label;
+  }
+
+  function clearRecordForm(form) {
+    form.reset();
+    form.elements.namedItem("id").value = "";
+    form.querySelector("[type=submit]").textContent = "Thêm mới";
+    form.querySelector(".cancel-edit").hidden = true;
+  }
+
+  function startEditing(form, record) {
+    form.elements.namedItem("id").value = record.id || "";
+    cmsFields[activeCmsTab].forEach(([name]) => { form.elements.namedItem(name).value = record[name] || ""; });
+    form.querySelector("[type=submit]").textContent = "Lưu chỉnh sửa";
+    form.querySelector(".cancel-edit").hidden = false;
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function loadContentRecords(type, list) {
+    list.textContent = "Đang tải nội dung…";
+    try {
+      const result = await postApi("listContent", {}, token());
+      const records = result[recordCollections[type]] || [];
+      if (!records.length) {
+        list.textContent = type === "services" ? "Chưa có dịch vụ nào." : "Chưa có nội dung nào. Hãy thêm nội dung mới.";
+        return;
+      }
+      list.replaceChildren(...records.map((record) => {
+        const row = document.createElement("article");
+        row.className = "cms-record";
+        const detail = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = record.title || record.name || record.author || "Nội dung";
+        const summary = document.createElement("small");
+        summary.textContent = type === "services"
+          ? [record.price, record.description].filter(Boolean).join(" · ")
+          : [record.author, record.summary || record.content || record.image_url || record.url].filter(Boolean).join(" · ");
+        detail.append(title, summary);
+        if (type === "gallery" && record.image_url) {
+          const image = document.createElement("img");
+          image.src = record.image_url;
+          image.alt = record.title || "";
+          image.loading = "lazy";
+          image.className = "cms-thumbnail";
+          detail.prepend(image);
+        }
+        const actions = document.createElement("div");
+        actions.className = "cms-record-actions";
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.textContent = "Chỉnh sửa";
+        edit.addEventListener("click", () => startEditing(form, record));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        const serviceActive = !/^(ngừng|ngưng|inactive|false|0)$/i.test(String(record.status || "").trim());
+        remove.textContent = type === "services" ? (serviceActive ? "Ngừng dịch vụ" : "Đã ngừng") : "Xóa";
+        remove.disabled = type === "services" && !serviceActive;
+        remove.addEventListener("click", async () => {
+          const prompt = type === "services"
+            ? "Ngừng dịch vụ này? Dịch vụ vẫn được giữ trong lịch sử đơn hàng."
+            : "Xóa nội dung này? Thao tác không thể hoàn tác.";
+          if (!window.confirm(prompt)) return;
+          remove.disabled = true;
+          try {
+            await postApi("deleteContent", { type: contentApiTypes[type], id: record.id }, token());
+            statusText(adminStatus, type === "services" ? "Đã ngừng dịch vụ." : "Đã xóa nội dung.");
+            await loadContentRecords(type, list);
+            getPublicData().then(paintPublicData).catch(() => {});
+          } catch (error) {
+            statusText(adminStatus, error.message, true);
+            remove.disabled = false;
+          }
+        });
+        actions.append(edit, remove);
+        row.append(detail, actions);
+        return row;
+      }));
+    } catch (error) {
+      list.textContent = error.message;
+      statusText(adminStatus, error.message, true);
+    }
+  }
+
+  function showCmsTab(type) {
+    activeCmsTab = type;
+    document.querySelectorAll(".admin-tabs button").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.tab === type));
+    });
+    document.getElementById("import-news").hidden = type !== "posts";
+    const userManagement = document.getElementById("user-management");
+    userManagement.hidden = type !== "users";
+    cmsRoot.hidden = type === "users";
+    if (type === "users") {
+      loadUsers();
+      return;
+    }
+    if (type === "settings") {
+      cmsRoot.replaceChildren();
+      const form = document.createElement("form");
+      form.className = "cms-settings";
+      const heading = document.createElement("h3");
+      heading.textContent = "Nội dung các phần trên trang";
+      const note = document.createElement("p");
+      note.textContent = "Các trường này cập nhật trực tiếp phần giới thiệu và liên hệ trên website. Để trống mục không dùng.";
+      form.append(heading, note);
+      settingFields.forEach(([key, label]) => {
+        const field = makeField(key, label, ["about", "direction", "hero_subtitle", "booking_description", "contact_description"].includes(key) ? "textarea" : "text", false);
+        form.append(field);
+      });
+      const save = document.createElement("button");
+      save.type = "submit";
+      save.className = "button button-lime";
+      save.textContent = "Lưu thông tin trang";
+      form.append(save);
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        save.disabled = true;
+        try {
+          const settings = Object.fromEntries(settingFields.map(([key]) => [key, form.elements.namedItem(key).value]));
+          await postApi("saveSettings", { settings }, token());
+          statusText(adminStatus, "Đã lưu thông tin trang.");
+          getPublicData().then(paintPublicData).catch(() => {});
+        } catch (error) {
+          statusText(adminStatus, error.message, true);
+        } finally {
+          save.disabled = false;
+        }
+      });
+      cmsRoot.append(form);
+      postApi("listContent", {}, token()).then((result) => {
+        settingFields.forEach(([key]) => { form.elements.namedItem(key).value = result.settings[key] || ""; });
+      }).catch((error) => statusText(adminStatus, error.message, true));
+      return;
+    }
+    const fields = cmsFields[type];
+    if (!fields) return;
+    cmsRoot.replaceChildren();
+    const form = document.createElement("form");
+    form.className = "cms-form";
+    const id = document.createElement("input");
+    id.type = "hidden";
+    id.name = "id";
+    form.append(id);
+    const heading = document.createElement("h3");
+    heading.textContent = `${tabTitles[type]} · thêm mới hoặc chỉnh sửa`;
+    form.append(heading);
+    fields.forEach(([name, label, kind, required]) => form.append(makeField(name, label, kind, required)));
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.className = "button button-lime";
+    save.textContent = "Thêm mới";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "text-link cancel-edit";
+    cancel.textContent = "Hủy chỉnh sửa";
+    cancel.hidden = true;
+    cancel.addEventListener("click", () => clearRecordForm(form));
+    form.append(save, cancel);
+    const listHeading = document.createElement("h3");
+    listHeading.textContent = `Nội dung đã tạo · ${tabTitles[type]}`;
+    const list = document.createElement("div");
+    list.className = "cms-record-list";
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      save.disabled = true;
+      const data = Object.fromEntries(new FormData(form).entries());
+      try {
+        await postApi("saveContent", { ...data, type: contentApiTypes[type] }, token());
+        statusText(adminStatus, data.id ? "Đã cập nhật nội dung." : "Đã thêm nội dung.");
+        clearRecordForm(form);
+        await loadContentRecords(type, list);
+        getPublicData().then(paintPublicData).catch(() => {});
+      } catch (error) {
+        statusText(adminStatus, error.message, true);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    cmsRoot.append(form, listHeading, list);
+    loadContentRecords(type, list);
+  }
+
+  document.querySelectorAll(".admin-tabs button").forEach((button) => button.addEventListener("click", () => showCmsTab(button.dataset.tab)));
   async function loadUsers() {
     const list = document.getElementById("user-list");
     try {
@@ -380,16 +688,6 @@
       list.textContent = error.message;
     }
   }
-  document.getElementById("content-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    try {
-      await postApi("saveContent", { type: form.get("type"), title: form.get("title"), body: form.get("body") }, token());
-      statusText(adminStatus, "Đã lưu nội dung.");
-      event.currentTarget.reset();
-      getPublicData().then(paintPublicData).catch(() => {});
-    } catch (error) { statusText(adminStatus, error.message, true); }
-  });
   document.getElementById("user-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -403,17 +701,12 @@
       loadUsers();
     } catch (error) { statusText(adminStatus, error.message, true); }
   });
-  const importButton = document.createElement("button");
-  importButton.id = "import-news";
-  importButton.className = "button button-lime";
-  importButton.type = "button";
-  importButton.textContent = "Lấy bài viết từ Google Sites";
-  importButton.hidden = true;
-  document.getElementById("admin-panel").append(importButton);
+  const importButton = document.getElementById("import-news");
   importButton.addEventListener("click", async () => {
     try {
       const result = await postApi("importNews", { url: "https://sites.google.com/view/chothueloakeohalong" }, token());
       statusText(adminStatus, `Đã nhập ${result.imported || 0} tiêu đề bài viết.`);
+      showCmsTab("posts");
       getPublicData().then(paintPublicData).catch(() => {});
     } catch (error) { statusText(adminStatus, error.message, true); }
   });

@@ -1,4 +1,4 @@
 window.SITE_CONFIG = {
   // Public Apps Script Web App URL. This URL is not a credential.
-  apiUrl: "https://script.google.com/macros/s/AKfycbybgbTIB8buq0cEc2P50zmKbZ7uTJ-KUOjcfrmiiZcC3YzK4ps_USgrm-vRc029CHJGeQ/exec"
+  apiUrl: "https://script.google.com/macros/s/AKfycbzKfmZZTiU1IYod_EEKspu3MdTDIoeaiBeD2WHQgWqEz3Fx4nYbmj8-Azd_s_l7i3DDYQ/exec"
 };
